@@ -49,6 +49,9 @@ class Comment implements \JsonSerializable
     /* @var DateTime */
     public $updated;
 
+    /* @var array */
+    public $errorMessages;
+
     /**
      * @var Visibility
      */

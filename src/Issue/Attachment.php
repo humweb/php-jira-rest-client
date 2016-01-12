@@ -31,6 +31,9 @@ class Attachment implements \JsonSerializable
     /* @var string */
    public $thumbnail;
 
+    /* @var array */
+    public $errorMessages;
+
     public function jsonSerialize()
     {
         return array_filter(get_object_vars($this));
