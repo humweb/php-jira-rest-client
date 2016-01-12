@@ -2,7 +2,9 @@
 
 namespace JiraRestApi\Project;
 
-class ProjectService extends \JiraRestApi\JiraClient
+use JiraRestApi\JiraClient;
+
+class ProjectService extends JiraClient
 {
     private $uri = '/project';
 
