@@ -2,9 +2,6 @@
 namespace JiraRestApi;
 
 use JiraRestApi\Configuration\ConfigurationInterface;
-use JiraRestApi\Configuration\DotEnvConfiguration;
-use Monolog\Logger as Logger;
-use Monolog\Handler\StreamHandler;
 
 /**
  * Interact jira server with REST API.
@@ -60,24 +57,10 @@ class JiraClient
      */
     public function __construct(ConfigurationInterface $configuration = null)
     {
-        if ($configuration === null) {
-            $path = "./";
-            if (!file_exists(".env")){
-                // If calling the getcwd() on laravel it will returning the 'public' directory.
-                $path = "../";
-            }
-            $configuration = new DotEnvConfiguration($path);
-        }
 
         $this->configuration = $configuration;
         $this->json_mapper = new \JsonMapper();
 
-        // create logger
-        $this->log = new Logger('JiraClient');
-        $this->log->pushHandler(new StreamHandler(
-            $configuration->getJiraLogFile(),
-            $this->convertLogLevel($configuration->getJiraLogLevel())
-        ));
 
         $this->http_response = 200;
     }
@@ -135,13 +118,11 @@ class JiraClient
      * @param null $custom_request
      *
      * @return string
-     * @throws JIRAException
+     * @throws JiraException
      */
     public function exec($context, $post_data = null, $custom_request = null)
     {
         $url = $this->createUrlByContext($context);
-
-        $this->log->addDebug("Curl $url JsonData=" . $post_data);
 
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -173,7 +154,6 @@ class JiraClient
 
         curl_setopt($ch, CURLOPT_VERBOSE, $this->getConfiguration()->isCurlOptVerbose());
 
-        $this->log->addDebug('Curl exec='.$url);
         $response = curl_exec($ch);
 
         // if request failed.
@@ -187,15 +167,15 @@ class JiraClient
                 return '';
             }
 
-            // HostNotFound, No route to Host, etc Network error
-            $this->log->addError('CURL Error: = '.$body);
-            throw new JiraException('CURL Error: = '.$body);
+            throw new JiraException('Error: '.$body);
         } else {
             // if request was ok, parsing http response code.
             $this->http_response = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
             curl_close($ch);
-
+            if (strpos($response, 'Issue Does Not Exist') !== false) {
+                return $response;
+            }
             // don't check 301, 302 because setting CURLOPT_FOLLOWLOCATION
             if ($this->http_response != 200 && $this->http_response != 201) {
                 throw new JiraException('CURL HTTP Request Failed: Status Code : '
@@ -231,7 +211,6 @@ class JiraClient
             curl_setopt($ch, CURLOPT_POSTFIELDS,
                 array('file' => '@'.$attachments.';filename='.$filename));
 
-            $this->log->addDebug('using legacy file upload');
         } else {
             // CURLFile require PHP > 5.5
             $attachments = new \CURLFile(realpath($upload_file));
@@ -240,7 +219,6 @@ class JiraClient
             curl_setopt($ch, CURLOPT_POSTFIELDS,
                     array('file' => $attachments));
 
-            $this->log->addDebug('using CURLFile='.var_export($attachments, true));
         }
 
         $this->authorization($ch);
@@ -257,8 +235,6 @@ class JiraClient
                 ));
 
         curl_setopt($ch, CURLOPT_VERBOSE, $this->getConfiguration()->isCurlOptVerbose());
-
-        $this->log->addDebug('Curl exec='.$url);
 
         return $ch;
     }
@@ -318,18 +294,14 @@ class JiraClient
 
                 // HostNotFound, No route to Host, etc Network error
                 $result_code = -1;
-                $body = 'CURL Error: = '.$body;
-                $this->log->addError($body);
+                $body = 'Error '.$body;
             } else {
                 // if request was ok, parsing http response code.
                 $result_code = $this->http_response = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
                 // don't check 301, 302 because setting CURLOPT_FOLLOWLOCATION
                 if ($this->http_response != 200 && $this->http_response != 201) {
-                    $body = 'CURL HTTP Request Failed: Status Code : '
-                     .$this->http_response.', URL:'.$url
-                     ."\nError Message : ".$response; // @TODO undefined variable $response
-                    $this->log->addError($body);
+                    $body = 'Request Failed: '.$this->http_response.PHP_EOL." URL:".$url;
                 }
             }
         }
@@ -337,15 +309,12 @@ class JiraClient
         // clean up
 end:
         foreach ($chArr as $ch) {
-            $this->log->addDebug('CURL Close handle..');
             curl_close($ch);
             curl_multi_remove_handle($mh, $ch);
         }
-        $this->log->addDebug('CURL Multi Close handle..');
         curl_multi_close($mh);
         if ($result_code != 200) {
-            // @TODO $body might have not been defined
-            throw new JIRAException('CURL Error: = '.$body, $result_code);
+            throw new JiraException('CURL Error: = '.$body, $result_code);
         }
 
         return $results;
